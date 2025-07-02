@@ -1,0 +1,9 @@
+langchain
+langgraph
+langchain-ollama
+psycopg2-binary
+pandas
+plotly
+streamlit
+SQLAlchemy
+sqlglot
