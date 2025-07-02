@@ -12,6 +12,41 @@ Beh AI is a sophisticated data analytics tool that bridges the gap between busin
 4. **Generates** interactive visualizations using Plotly
 5. **Self-corrects** common issues automatically
 
+## 🤖 Understanding AI Agents
+
+### What's an AI Agent?
+Think of an AI Agent as a **smart digital assistant** that can understand what you want and automatically figure out how to do it. Unlike regular software that needs specific instructions, our AI Agent can:
+
+- 🧠 **Think**: Understands your questions in plain English
+- 🔍 **Explore**: Investigates your database to understand its structure  
+- 🛠️ **Execute**: Writes and runs SQL queries automatically
+- 📊 **Create**: Builds beautiful charts from the results
+- 🔧 **Fix**: Corrects mistakes on its own
+
+### Simple Example: From Question to Answer
+
+**You ask**: *"Which products sell the most?"*
+
+**Behind the scenes, our AI Agent**:
+```
+🧠 Thinks: "User wants top-selling products"
+🔍 Explores: "Found 'products' and 'sales' tables"  
+🛠️ Writes: "SELECT product_name, SUM(quantity) FROM..."
+✅ Validates: "Query looks correct, tables exist"
+🚀 Executes: Runs the query on your database
+📊 Visualizes: Creates a bar chart automatically
+```
+
+**You get**: Interactive chart showing top products in 15 seconds! ⚡
+
+### Why This Matters
+- **No SQL Knowledge Needed**: Just ask questions naturally
+- **No Manual Work**: Everything happens automatically
+- **Always Accurate**: Validates against your actual database
+- **Self-Healing**: Fixes common errors without bothering you
+
+*This turns complex data analysis into simple conversations!* 💬➡️📊
+
 ## 🚀 Features
 
 - **Natural Language Processing**: Ask questions like "Show me the number of users per email domain"
