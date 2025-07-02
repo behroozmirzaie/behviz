@@ -1,10 +1,10 @@
-# Beh AI - Natural Language to SQL Visualization
+# Beh Viz - Natural Language to SQL Visualization
 
 An intelligent AI-powered application that converts natural language questions into SQL queries and automatically generates interactive visualizations from the results.
 
 ## 🎯 Project Overview
 
-Beh AI is a sophisticated data analytics tool that bridges the gap between business users and database analytics. Users can ask questions in plain English, and the system automatically:
+Beh Viz is a sophisticated data analytics tool that bridges the gap between business users and database analytics. Users can ask questions in plain English, and the system automatically:
 
 1. **Translates** natural language to SQL queries
 2. **Validates** queries against the database schema  
@@ -320,4 +320,4 @@ For support and questions:
 
 ---
 
-**Beh AI** - Transforming natural language into actionable data insights! 🚀📊
+**Beh Viz** - Transforming natural language into actionable data insights! 🚀📊
