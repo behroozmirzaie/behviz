@@ -62,26 +62,71 @@ def validate_query(query, schema):
     try:
         st.info(f"Debug - Validating query: {query}")
         
+        # Security check: Only allow safe DML queries (SELECT only)
+        query_upper = query.strip().upper()
+        
+        # Block DDL and dangerous DML statements
+        dangerous_keywords = [
+            'CREATE', 'DROP', 'ALTER', 'TRUNCATE', 'DELETE', 'INSERT',
+            'UPDATE', 'GRANT', 'REVOKE', 'COMMIT', 'ROLLBACK',
+            'SAVEPOINT', 'EXEC', 'EXECUTE', 'CALL', 'DECLARE', 'SET', 'SHOW'
+        ]
+        
+        for keyword in dangerous_keywords:
+            if (query_upper.startswith(keyword) or
+                    f' {keyword} ' in query_upper):
+                error_msg = (f"Query contains prohibited keyword '{keyword}'. "
+                             "Only SELECT queries are allowed.")
+                return False, error_msg
+        
+        # Ensure query starts with SELECT
+        if not query_upper.startswith('SELECT'):
+            return False, "Only SELECT queries are allowed."
+        
+        # Additional security: Check for suspicious patterns
+        suspicious_patterns = [
+            r'\bINTO\s+OUTFILE\b',  # File operations
+            r'\bLOAD_FILE\b',       # File reading
+            r'\bUNION\s+SELECT.*\bFROM\s+information_schema\b',  # Schema inj
+            r';.*SELECT',           # Multiple statements
+            r'--',                  # SQL comments (potential injection)
+            r'/\*.*\*/',           # SQL comments
+        ]
+        
+        for pattern in suspicious_patterns:
+            if re.search(pattern, query, re.IGNORECASE):
+                error_msg = ("Query contains suspicious pattern. "
+                             "Please use simple SELECT queries only.")
+                return False, error_msg
+        
+        st.info("Security validation passed - Query is safe to execute.")
+        
         # Simple regex approach to extract table aliases
         alias_to_table = {}
         
         # Pattern: FROM table_name [AS] alias_name
         # This handles both "FROM users u" and "FROM users AS u"
-        from_pattern = r'FROM\s+(\w+)(?:\s+AS)?\s+(\w+)(?:\s|$|,|JOIN|WHERE|GROUP|ORDER|LIMIT)'
+        from_pattern = (r'FROM\s+(\w+)(?:\s+AS)?\s+(\w+)'
+                       r'(?:\s|$|,|JOIN|WHERE|GROUP|ORDER|LIMIT)')
         from_matches = re.findall(from_pattern, query, re.IGNORECASE)
         for table_name, alias_name in from_matches:
             # Skip if alias_name is a SQL keyword
-            if alias_name.upper() not in ['WHERE', 'GROUP', 'ORDER', 'LIMIT', 'HAVING', 'JOIN', 'ON']:
+            skip_keywords = ['WHERE', 'GROUP', 'ORDER', 'LIMIT', 'HAVING',
+                            'JOIN', 'ON']
+            if alias_name.upper() not in skip_keywords:
                 alias_to_table[alias_name] = table_name
                 st.info(f"Debug - FROM: {alias_name} -> {table_name}")
         
-        # Pattern: JOIN table_name [AS] alias_name  
+        # Pattern: JOIN table_name [AS] alias_name
         # This handles both "JOIN users u" and "JOIN users AS u"
-        join_pattern = r'JOIN\s+(\w+)(?:\s+AS)?\s+(\w+)(?:\s|$|,|ON|WHERE|GROUP|ORDER|LIMIT)'
+        join_pattern = (r'JOIN\s+(\w+)(?:\s+AS)?\s+(\w+)'
+                       r'(?:\s|$|,|ON|WHERE|GROUP|ORDER|LIMIT)')
         join_matches = re.findall(join_pattern, query, re.IGNORECASE)
         for table_name, alias_name in join_matches:
             # Skip if alias_name is a SQL keyword
-            if alias_name.upper() not in ['ON', 'WHERE', 'GROUP', 'ORDER', 'LIMIT', 'HAVING']:
+            skip_keywords = ['ON', 'WHERE', 'GROUP', 'ORDER', 'LIMIT',
+                            'HAVING']
+            if alias_name.upper() not in skip_keywords:
                 alias_to_table[alias_name] = table_name
                 st.info(f"Debug - JOIN: {alias_name} -> {table_name}")
         
