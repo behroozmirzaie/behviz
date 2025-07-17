@@ -7,6 +7,7 @@ from langchain_ollama.chat_models import ChatOllama
 import json
 import sqlglot
 import time
+import re
 
 
 def get_data(query: str) -> pd.DataFrame:
@@ -59,42 +60,83 @@ def get_db_schema():
 
 def validate_query(query, schema):
     try:
+        st.info(f"Debug - Validating query: {query}")
+        
+        # Simple regex approach to extract table aliases
+        alias_to_table = {}
+        
+        # Pattern: FROM table_name [AS] alias_name
+        # This handles both "FROM users u" and "FROM users AS u"
+        from_pattern = r'FROM\s+(\w+)(?:\s+AS)?\s+(\w+)(?:\s|$|,|JOIN|WHERE|GROUP|ORDER|LIMIT)'
+        from_matches = re.findall(from_pattern, query, re.IGNORECASE)
+        for table_name, alias_name in from_matches:
+            # Skip if alias_name is a SQL keyword
+            if alias_name.upper() not in ['WHERE', 'GROUP', 'ORDER', 'LIMIT', 'HAVING', 'JOIN', 'ON']:
+                alias_to_table[alias_name] = table_name
+                st.info(f"Debug - FROM: {alias_name} -> {table_name}")
+        
+        # Pattern: JOIN table_name [AS] alias_name  
+        # This handles both "JOIN users u" and "JOIN users AS u"
+        join_pattern = r'JOIN\s+(\w+)(?:\s+AS)?\s+(\w+)(?:\s|$|,|ON|WHERE|GROUP|ORDER|LIMIT)'
+        join_matches = re.findall(join_pattern, query, re.IGNORECASE)
+        for table_name, alias_name in join_matches:
+            # Skip if alias_name is a SQL keyword
+            if alias_name.upper() not in ['ON', 'WHERE', 'GROUP', 'ORDER', 'LIMIT', 'HAVING']:
+                alias_to_table[alias_name] = table_name
+                st.info(f"Debug - JOIN: {alias_name} -> {table_name}")
+        
+        st.info(f"Debug - Alias mapping: {alias_to_table}")
+        
+        # Now use SQLGlot to validate the structure
         parsed = sqlglot.parse_one(query, read="postgres")
-
-        # Collect all table names used in the query
-        tables_in_query = {table.name for table in parsed.find_all(sqlglot.exp.Table)}
-
+        
+        # Get all actual table names from the query
+        actual_tables = set()
+        for table in parsed.find_all(sqlglot.exp.Table):
+            actual_tables.add(table.name)
+        
         # Check for required join between sales and products
-        if 'sales' in tables_in_query and 'products' in tables_in_query:
+        if 'sales' in actual_tables and 'products' in actual_tables:
             join_conditions = parsed.find_all(sqlglot.exp.Join)
             join_on_product_id = False
             for join in join_conditions:
-                if 'sales.product_id' in str(join.on) and 'products.id' in str(join.on):
+                join_str = str(join.on)
+                if ('product_id' in join_str and 'id' in join_str):
                     join_on_product_id = True
                     break
             if not join_on_product_id:
-                return False, "Query involves 'sales' and 'products' tables but does not join on 'sales.product_id = products.id'."
+                return False, ("Query involves 'sales' and 'products' tables "
+                               "but does not join on proper keys.")
 
+        # Validate columns
         for column in parsed.find_all(sqlglot.exp.Column):
             column_name = column.name
-            table_name = column.table
-            if not table_name:
+            table_ref = column.table
+            
+            # Resolve alias to actual table name
+            if table_ref and table_ref in alias_to_table:
+                table_ref = alias_to_table[table_ref]
+                st.info(f"Debug - Resolved {column.table}.{column_name} -> {table_ref}.{column_name}")
+            
+            if not table_ref:
                 # Try to infer table name for columns without explicit table prefix
-                for table in tables_in_query:
-                    if column_name in schema['public'].get(table, []):
-                        table_name = table
+                for table in actual_tables:
+                    if column_name in schema.get('public', {}).get(table, []):
+                        table_ref = table
                         break
 
-            if not table_name:
-                # If table is still unknown, it might be a derived column, which is harder to validate statically.
-                # For simplicity, we'll assume it's okay if we can't resolve the table.
+            if not table_ref:
+                # If table is still unknown, skip validation for this column
+                st.warning(f"Debug - Could not resolve table for column: {column_name}")
                 continue
 
-            if table_name not in schema['public']:
-                return False, f"Table '{table_name}' not found in the database schema."
+            # Check if table exists in schema
+            if table_ref not in schema.get('public', {}):
+                return False, f"Table '{table_ref}' not found in the database schema."
 
-            if column_name not in schema['public'][table_name]:
-                return False, f"Column '{column_name}' not found in table '{table_name}'."
+            # Check if column exists in table
+            if column_name not in schema.get('public', {}).get(table_ref, []):
+                return False, f"Column '{column_name}' not found in table '{table_ref}'."
 
         return True, ""
     except Exception as e:
@@ -121,13 +163,29 @@ if st.button("Generate Visualization"):
         st.info("Database schema loaded successfully.")
         with st.expander("View Database Schema"):
             st.json(schema)
+        
+        # Debug: Show schema structure
+        if schema:
+            st.info(f"Schema keys: {list(schema.keys())}")
+            if 'public' in schema:
+                st.info(f"Public schema tables: {list(schema['public'].keys())}")
+                for table_name, columns in schema['public'].items():
+                    st.info(f"Table '{table_name}' columns: {columns}")
+        else:
+            st.error("Schema is None!")
 
     with st.spinner("Generating and validating SQL query..."):
         st.info("User prompt received: " + prompt)
 
         system_prompt = f'''You are an expert SQL data analyst. A user will ask a question in natural language. You must generate a JSON object with two keys: 'sql_query' and 'chart_info'.
 
-        **IMPORTANT**: The SQL query MUST be for PostgreSQL. Do NOT use functions like `INSTR` which are not available in PostgreSQL. For string splitting, use `split_part`.
+        **IMPORTANT**: The SQL query MUST be for PostgreSQL. Use ONLY these PostgreSQL functions:
+        - For string splitting: split_part(string, delimiter, field_number)
+        - For email domains: split_part(email, '@', 2)
+        - For dates: EXTRACT(YEAR FROM date_column), DATE_TRUNC('month', date_column)
+        - For counting: COUNT(*), COUNT(DISTINCT column)
+        - For aggregation: SUM, AVG, MIN, MAX
+        - DO NOT use: INSTR, SUBSTRING_INDEX, DOMAIN, or any MySQL-specific functions
 
         Use the following database schema to construct the query:
         {json.dumps(schema, indent=2)}
@@ -140,37 +198,64 @@ if st.button("Generate Visualization"):
             *   `x_axis`: The column name for the X-axis.
             *   `y_axis`: The column name for the Y-axis.
 
-        Example:
+        Example for email domain extraction:
 
-        User prompt: "What is the distribution of users by country?"
+        User prompt: "Show me the number of users per email domain"
 
         {{
-          "sql_query": "SELECT country, COUNT(*) AS user_count FROM users GROUP BY country;",
+          "sql_query": "SELECT split_part(email, '@', 2) AS email_domain, COUNT(*) AS user_count FROM users GROUP BY split_part(email, '@', 2);",
           "chart_info": {{
             "type": "bar",
-            "x_axis": "country",
+            "x_axis": "email_domain",
             "y_axis": "user_count"
           }}
         }}
         '''
 
-        response = llm.invoke(system_prompt + "\n\nUser prompt: " + prompt)
-        response_data = json.loads(response.content)
-
-        original_query = response_data["sql_query"]
-        chart_info = response_data["chart_info"]
-
-        st.info("Original Generated SQL Query: " + original_query)
-
-        # Translate the query to PostgreSQL dialect to fix dialect-specific function errors
         try:
-            # Assuming the LLM might default to a more generic or MySQL-like dialect
-            translated_query = sqlglot.transpile(original_query, write="postgres", read="mysql")[0]
+            # Try using proper message format for ChatOllama
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ]
+            response = llm.invoke(messages)
+            response_data = json.loads(response.content)
+
+            original_query = response_data["sql_query"]
+            chart_info = response_data["chart_info"]
+
+            st.info("Original Generated SQL Query: " + original_query)
+        except Exception as e:
+            st.error(f"Error calling LLM or parsing response: {e}")
+            if 'response' in locals():
+                st.error(f"LLM Response: {response.content}")
+            st.stop()
+
+        # Translate the query to PostgreSQL dialect and fix common issues
+        try:
+            # First, fix common PostgreSQL syntax issues
+            query_fixed = original_query
+            
+            # Fix EXTRACT(DOMAIN FROM email) -> split_part(email, '@', 2)
+            domain_pattern = r'EXTRACT\s*\(\s*DOMAIN\s+FROM\s+(\w+)\s*\)'
+            query_fixed = re.sub(domain_pattern, r"split_part(\1, '@', 2)", query_fixed, flags=re.IGNORECASE)
+            
+            # Fix SUBSTRING_INDEX -> split_part
+            substring_pattern = r'SUBSTRING_INDEX\s*\(\s*(\w+)\s*,\s*([\'"])([^\'"]+)\2\s*,\s*(\d+)\s*\)'
+            query_fixed = re.sub(substring_pattern, r'split_part(\1, \2\3\2, \4)', query_fixed, flags=re.IGNORECASE)
+            
+            if query_fixed != original_query:
+                st.info(f"Fixed PostgreSQL syntax: {query_fixed}")
+            
+            # Then transpile to ensure proper PostgreSQL dialect
+            translated_query = sqlglot.transpile(query_fixed, write="postgres", read="mysql")[0]
             st.info("Translated PostgreSQL Query: " + translated_query)
             query = translated_query
         except Exception as e:
             st.error(f"Error translating SQL query to PostgreSQL dialect: {e}")
-            st.stop()
+            # Fall back to the fixed query if transpilation fails
+            query = query_fixed if 'query_fixed' in locals() else original_query
+            st.info(f"Using fallback query: {query}")
 
         st.info("Validating query against schema...")
         is_valid, error_message = validate_query(query, schema)
@@ -197,7 +282,6 @@ if st.button("Generate Visualization"):
                 # Self-correction for y-axis column name
                 if y_axis not in data.columns:
                     st.warning(f"Y-axis '{y_axis}' not found in query results. Attempting to self-correct.")
-                    # Find a likely candidate for the y-axis (the other column)
                     potential_y_axes = [col for col in data.columns if col != x_axis]
                     if len(potential_y_axes) == 1:
                         y_axis = potential_y_axes[0]

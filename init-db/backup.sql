@@ -11,7 +11,7 @@ SET standard_conforming_strings = on;
 -- Drop databases (except postgres and template1)
 --
 
-DROP DATABASE mydatabase;
+
 
 
 
@@ -20,14 +20,14 @@ DROP DATABASE mydatabase;
 -- Drop roles
 --
 
-DROP ROLE "user";
+
 
 
 --
 -- Roles
 --
 
-CREATE ROLE "user";
+
 ALTER ROLE "user" WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS PASSWORD 'SCRAM-SHA-256$4096:JOYc9ZEoRRqD5qpaJXrU2Q==$u80JjkYxgjzIF1CD6gRBahD7P/WRxH7gf9Nxhe4P92Q=:73mngfQP5PNwWOZRtaAcgTVyd1ym4u8bLuIEn2ttVEY=';
 
 --
@@ -156,7 +156,7 @@ SET row_security = off;
 -- Name: mydatabase; Type: DATABASE; Schema: -; Owner: user
 --
 
-CREATE DATABASE mydatabase WITH TEMPLATE = template0 ENCODING = 'UTF8' LOCALE_PROVIDER = libc LOCALE = 'en_US.utf8';
+
 
 
 ALTER DATABASE mydatabase OWNER TO "user";
