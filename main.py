@@ -195,8 +195,14 @@ if st.button("Generate Visualization"):
         1.  `sql_query`: A valid PostgreSQL query that answers the user's question based on the provided schema.
         2.  `chart_info`: A JSON object with three keys:
             *   `type`: The best chart type (bar, line, scatter, pie).
-            *   `x_axis`: The column name for the X-axis.
-            *   `y_axis`: The column name for the Y-axis.
+            *   `x_axis`: SINGLE column name for the X-axis (do not use comma-separated values).
+            *   `y_axis`: SINGLE column name for the Y-axis (do not use comma-separated values).
+
+        **Chart Guidelines**:
+        - For aggregated data (counts, sums): use bar or pie charts
+        - For user lists or single records: use a simple table view (type: "table") 
+        - Always specify ONE column for x_axis and ONE column for y_axis
+        - For queries returning user names, consider concatenating them in SQL or use first_name as x_axis
 
         Example for email domain extraction:
 
@@ -208,6 +214,19 @@ if st.button("Generate Visualization"):
             "type": "bar",
             "x_axis": "email_domain",
             "y_axis": "user_count"
+          }}
+        }}
+
+        Example for user ranking:
+
+        User prompt: "Who is the most valuable user?"
+
+        {{
+          "sql_query": "SELECT CONCAT(first_name, ' ', last_name) AS full_name, SUM(total_price) AS total_spent FROM sales s JOIN users u ON s.user_id = u.id GROUP BY u.id, u.first_name, u.last_name ORDER BY SUM(total_price) DESC LIMIT 10;",
+          "chart_info": {{
+            "type": "bar",
+            "x_axis": "full_name",
+            "y_axis": "total_spent"
           }}
         }}
         '''
@@ -279,7 +298,42 @@ if st.button("Generate Visualization"):
                 x_axis = chart_info["x_axis"]
                 y_axis = chart_info["y_axis"]
 
-                # Self-correction for y-axis column name
+                # Fix x_axis if it contains multiple column names
+                if ',' in x_axis:
+                    # Split and take the first valid column
+                    x_candidates = [col.strip() for col in x_axis.split(',')]
+                    for candidate in x_candidates:
+                        if candidate in data.columns:
+                            x_axis = candidate
+                            st.info(f"Fixed x_axis from '{chart_info['x_axis']}' to '{x_axis}'")
+                            break
+                    else:
+                        # If no candidate found, use the first column
+                        x_axis = data.columns[0]
+                        st.info(f"No valid x_axis found, using first column: '{x_axis}'")
+                
+                # Fix y_axis if it contains multiple column names
+                if ',' in y_axis:
+                    y_candidates = [col.strip() for col in y_axis.split(',')]
+                    for candidate in y_candidates:
+                        if candidate in data.columns:
+                            y_axis = candidate
+                            st.info(f"Fixed y_axis from '{chart_info['y_axis']}' to '{y_axis}'")
+                            break
+                    else:
+                        # If no candidate found, use a numeric column or last column
+                        numeric_cols = data.select_dtypes(include=['number']).columns
+                        if len(numeric_cols) > 0:
+                            y_axis = numeric_cols[0]
+                        else:
+                            y_axis = data.columns[-1]
+                        st.info(f"No valid y_axis found, using: '{y_axis}'")
+
+                # Self-correction for column names not found in data
+                if x_axis not in data.columns:
+                    st.warning(f"X-axis '{x_axis}' not found in query results. Using first column.")
+                    x_axis = data.columns[0]
+                
                 if y_axis not in data.columns:
                     st.warning(f"Y-axis '{y_axis}' not found in query results. Attempting to self-correct.")
                     potential_y_axes = [col for col in data.columns if col != x_axis]
@@ -289,6 +343,8 @@ if st.button("Generate Visualization"):
                     else:
                         st.error("Could not determine the correct Y-axis column.")
                         st.stop()
+
+                st.info(f"Using chart: {chart_type}, x='{x_axis}', y='{y_axis}'")
 
                 if chart_type == "bar":
                     fig = px.bar(data, x=x_axis, y=y_axis)
